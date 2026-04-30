@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
-import os
+import plotly.graph_objects as go
 from datetime import datetime
 
 # ── Page Config ──────────────────────────────────────────────────────────────
@@ -28,15 +27,9 @@ st.markdown("""
 # ── Load Data ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    # Load dari file lokal (main_data.csv di folder dashboard)
-    local_path = os.path.join(os.path.dirname(__file__), "main_data.csv")
-    if os.path.exists(local_path):
-        df = pd.read_csv(local_path)
-    else:
-        file_id = "1kB3n7XBYqnvIqXggYymXnOh6kDnA1hev"
-        url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        df = pd.read_csv(url)
-
+    file_id = "1kB3n7XBYqnvIqXggYymXnOh6kDnA1hev"
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    df = pd.read_csv(url)
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["order_delivered_customer_date"] = pd.to_datetime(df["order_delivered_customer_date"], errors="coerce")
     df["order_estimated_delivery_date"] = pd.to_datetime(df["order_estimated_delivery_date"], errors="coerce")
@@ -48,6 +41,18 @@ def load_data():
         df["order_delivered_customer_date"] - df["order_purchase_timestamp"]
     ).dt.days
     df["on_time"] = df["order_delivered_customer_date"] <= df["order_estimated_delivery_date"]
+    
+    # Fetch product categories from Kaggle dataset
+    try:
+        products_df = pd.read_csv(
+            "https://raw.githubusercontent.com/olist/datasets/master/products.csv",
+            usecols=['product_id', 'product_category_name']
+        )
+        df = df.merge(products_df, on='product_id', how='left')
+    except:
+        # Fallback: create dummy category if fetch fails
+        df['product_category_name'] = 'Kategori Tidak Tersedia'
+    
     return df
 
 df = load_data()
@@ -110,10 +115,9 @@ with col_left:
         .reset_index()
     )
     fig_trend = go.Figure()
-    # Warna seragam untuk bar
     fig_trend.add_trace(go.Bar(
         x=monthly["year_month"], y=monthly["total_orders"],
-        name="Jumlah Pesanan", marker_color="#4361ee",
+        name="Jumlah Pesanan", marker_color="#4361ee", opacity=0.8,
         yaxis="y1"
     ))
     fig_trend.add_trace(go.Scatter(
@@ -170,20 +174,88 @@ with col_b:
     day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_label = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     day_counts = filtered["day_of_week"].value_counts().reindex(day_order).fillna(0)
-    # Gunakan warna seragam (bukan color scale) agar prinsip desain visualisasi terpenuhi
-    fig_bar = go.Figure(go.Bar(
-        x=day_label,
-        y=day_counts.values,
-        marker_color="#4361ee",
-    ))
+    fig_bar = px.bar(
+        x=day_label, y=day_counts.values,
+        color=day_counts.values,
+        color_continuous_scale=["#c9d6ff", "#4361ee"],
+        labels={"x": "Hari", "y": "Jumlah Pesanan"},
+    )
     fig_bar.update_layout(
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=0, r=0, t=30, b=0), height=280,
-        showlegend=False,
-        xaxis_title="Hari",
-        yaxis_title="Jumlah Pesanan"
+        showlegend=False, coloraxis_showscale=False
     )
     st.plotly_chart(fig_bar, use_container_width=True)
+
+# ── Row 2.5: Product Category Performance ──────────────────────────────────────
+st.markdown("---")
+st.subheader("🏆 Performa Kategori Produk (Jumlah Pesanan)")
+
+col_cat_left, col_cat_right = st.columns(2)
+
+with col_cat_left:
+    st.write("**Top 10 Kategori Tertinggi**")
+    if 'product_category_name' in filtered.columns:
+        top_categories = (
+            filtered.groupby('product_category_name')
+            .agg(jumlah_pesanan=('order_id', 'count'), total_revenue=('price', 'sum'))
+            .sort_values('jumlah_pesanan', ascending=False)
+            .head(10)
+            .reset_index()
+        )
+        
+        fig_top = px.bar(
+            top_categories, 
+            x='jumlah_pesanan', 
+            y='product_category_name',
+            orientation='h',
+            color='jumlah_pesanan',
+            color_continuous_scale=["#7209b7", "#f72585"],
+            labels={"jumlah_pesanan": "Jumlah Pesanan", "product_category_name": "Kategori"},
+            text='jumlah_pesanan'
+        )
+        fig_top.update_traces(textposition='outside', texttemplate='%{text:,.0f}')
+        fig_top.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=150, r=0, t=30, b=0), height=350,
+            showlegend=False, coloraxis_showscale=False,
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        st.plotly_chart(fig_top, use_container_width=True)
+    else:
+        st.warning("⚠️ Data kategori tidak tersedia")
+
+with col_cat_right:
+    st.write("**Bottom 10 Kategori Terendah**")
+    if 'product_category_name' in filtered.columns:
+        bottom_categories = (
+            filtered.groupby('product_category_name')
+            .agg(jumlah_pesanan=('order_id', 'count'), total_revenue=('price', 'sum'))
+            .sort_values('jumlah_pesanan', ascending=True)
+            .head(10)
+            .reset_index()
+        )
+        
+        fig_bottom = px.bar(
+            bottom_categories, 
+            x='jumlah_pesanan', 
+            y='product_category_name',
+            orientation='h',
+            color='jumlah_pesanan',
+            color_continuous_scale=["#ffd166", "#ef476f"],
+            labels={"jumlah_pesanan": "Jumlah Pesanan", "product_category_name": "Kategori"},
+            text='jumlah_pesanan'
+        )
+        fig_bottom.update_traces(textposition='outside', texttemplate='%{text:,.0f}')
+        fig_bottom.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=150, r=0, t=30, b=0), height=350,
+            showlegend=False, coloraxis_showscale=False,
+            yaxis={'categoryorder': 'total ascending'}
+        )
+        st.plotly_chart(fig_bottom, use_container_width=True)
+    else:
+        st.warning("⚠️ Data kategori tidak tersedia")
 
 # ── Row 3: Delivery Days + Freight vs Price ────────────────────────────────────
 col_c, col_d = st.columns(2)
@@ -195,7 +267,7 @@ with col_c:
     ]["delivery_days"]
     fig_box = px.histogram(
         delivery_data, nbins=40,
-        color_discrete_sequence=["#4361ee"],
+        color_discrete_sequence=["#7209b7"],
         labels={"value": "Hari Pengiriman", "count": "Jumlah"},
     )
     fig_box.update_layout(
