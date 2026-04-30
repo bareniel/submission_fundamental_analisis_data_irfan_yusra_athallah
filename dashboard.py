@@ -29,7 +29,10 @@ st.markdown("""
 def load_data():
     file_id = "1kB3n7XBYqnvIqXggYymXnOh6kDnA1hev"
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Memuat data dari GDrive
     df = pd.read_csv(url)
+    
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["order_delivered_customer_date"] = pd.to_datetime(df["order_delivered_customer_date"], errors="coerce")
     df["order_estimated_delivery_date"] = pd.to_datetime(df["order_estimated_delivery_date"], errors="coerce")
@@ -42,15 +45,16 @@ def load_data():
     ).dt.days
     df["on_time"] = df["order_delivered_customer_date"] <= df["order_estimated_delivery_date"]
     
-    # Fetch product categories from Kaggle dataset
+    # Fetch product categories dari repository Github
     try:
         products_df = pd.read_csv(
             "https://raw.githubusercontent.com/bareniel/E-Commerce-Public-Dataset/refs/heads/bareniel-patch-1/products_dataset.csv",
             usecols=['product_id', 'product_category_name']
         )
         df = df.merge(products_df, on='product_id', how='left')
-    except:
-        # Fallback: create dummy category if fetch fails
+        df['product_category_name'] = df['product_category_name'].fillna('Tidak Diketahui')
+    except Exception:
+        # Fallback jika fetch gagal
         df['product_category_name'] = 'Kategori Tidak Tersedia'
     
     return df
@@ -62,10 +66,11 @@ with st.sidebar:
     st.image("https://img.icons8.com/color/96/shopping-cart.png", width=60)
     st.title("🔍 Filter Data")
 
-    year_options = sorted(df["year"].unique())
+    year_options = sorted(df["year"].dropna().unique())
     selected_years = st.multiselect("Tahun", year_options, default=year_options)
 
-    status_options = sorted(df["order_status"].unique())
+    # PERBAIKAN: Gunakan .dropna() untuk membuang nilai NaN sebelum diurutkan (sorted)
+    status_options = sorted(df["order_status"].dropna().unique())
     selected_status = st.multiselect("Status Pesanan", status_options, default=status_options)
 
     price_min, price_max = float(df["price"].min()), float(df["price"].max())
@@ -81,6 +86,11 @@ filtered = df[
     df["order_status"].isin(selected_status) &
     df["price"].between(price_range[0], price_range[1])
 ]
+
+# Tambahan pengaman: Jika filter membuat data kosong, hentikan eksekusi di bawahnya
+if filtered.empty:
+    st.warning("⚠️ Tidak ada data yang sesuai dengan filter yang dipilih. Silakan sesuaikan filter Anda.")
+    st.stop()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📦 Dashboard E-Commerce")
@@ -98,8 +108,8 @@ on_time_pct = filtered["on_time"].mean() * 100 if filtered["on_time"].notna().an
 
 col1.metric("🛒 Total Pesanan", f"{total_orders:,}")
 col2.metric("💰 Total Pendapatan", f"R$ {total_revenue:,.0f}")
-col3.metric("🎯 Rata-rata Harga", f"R$ {avg_order_value:.2f}")
-col4.metric("🚚 Rata-rata Pengiriman", f"{avg_delivery:.1f} hari")
+col3.metric("🎯 Rata-rata Harga", f"R$ {avg_order_value:.2f}" if pd.notna(avg_order_value) else "N/A")
+col4.metric("🚚 Rata-rata Pengiriman", f"{avg_delivery:.1f} hari" if pd.notna(avg_delivery) else "N/A")
 col5.metric("✅ On-Time Delivery", f"{on_time_pct:.1f}%")
 
 st.markdown("---")
@@ -265,31 +275,47 @@ with col_c:
     delivery_data = filtered[
         (filtered["delivery_days"] > 0) & (filtered["delivery_days"] <= 60)
     ]["delivery_days"]
-    fig_box = px.histogram(
-        delivery_data, nbins=40,
-        color_discrete_sequence=["#7209b7"],
-        labels={"value": "Hari Pengiriman", "count": "Jumlah"},
-    )
-    fig_box.update_layout(
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=0, r=0, t=30, b=0), height=280,
-        showlegend=False, bargap=0.05,
-        xaxis_title="Hari Pengiriman", yaxis_title="Jumlah Pesanan"
-    )
-    st.plotly_chart(fig_box, use_container_width=True)
+    
+    # Pengaman: pastikan delivery_data tidak kosong agar tidak error di px.histogram
+    if delivery_data.empty:
+        st.info("ℹ️ Tidak ada data pengiriman yang valid untuk ditampilkan.")
+    else:
+        fig_box = px.histogram(
+            delivery_data, nbins=40,
+            color_discrete_sequence=["#7209b7"],
+            labels={"value": "Hari Pengiriman", "count": "Jumlah"},
+        )
+        fig_box.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=0, r=0, t=30, b=0), height=280,
+            showlegend=False, bargap=0.05,
+            xaxis_title="Hari Pengiriman", yaxis_title="Jumlah Pesanan"
+        )
+        st.plotly_chart(fig_box, use_container_width=True)
 
 with col_d:
     st.subheader("✈️ Ongkos Kirim vs Harga Produk")
     sample = filtered[filtered["price"] <= filtered["price"].quantile(0.95)].sample(
         min(3000, len(filtered)), random_state=42
     )
-    fig_scatter = px.scatter(
-        sample, x="price", y="freight_value",
-        color="order_status",
-        opacity=0.5, size_max=6,
-        labels={"price": "Harga (R$)", "freight_value": "Ongkos Kirim (R$)", "order_status": "Status"},
-        color_discrete_sequence=px.colors.qualitative.Bold
-    )
+    
+    # Pengaman: Jika tidak ada order_status atau isinya semua NaN, abaikan argumen color
+    if "order_status" in sample.columns and not sample["order_status"].isna().all():
+        fig_scatter = px.scatter(
+            sample, x="price", y="freight_value",
+            color="order_status",
+            opacity=0.5, size_max=6,
+            labels={"price": "Harga (R$)", "freight_value": "Ongkos Kirim (R$)", "order_status": "Status"},
+            color_discrete_sequence=px.colors.qualitative.Bold
+        )
+    else:
+         fig_scatter = px.scatter(
+            sample, x="price", y="freight_value",
+            opacity=0.5, size_max=6,
+            labels={"price": "Harga (R$)", "freight_value": "Ongkos Kirim (R$)"},
+            color_discrete_sequence=px.colors.qualitative.Bold
+        )       
+    
     fig_scatter.update_layout(
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=0, r=0, t=30, b=0), height=280,
@@ -300,11 +326,15 @@ with col_d:
 # ── Raw Data Preview ──────────────────────────────────────────────────────────
 st.markdown("---")
 with st.expander("🗄️ Lihat Data Mentah", expanded=False):
+    # Pengaman: pastikan kolom yang diminta benar-benar ada sebelum ditampilkan
+    base_cols = [
+        "order_id", "order_status", "order_purchase_timestamp",
+        "price", "freight_value", "product_category_name", "delivery_days", "on_time"
+    ]
+    display_cols = [c for c in base_cols if c in filtered.columns]
+    
     st.dataframe(
-        filtered[[
-            "order_id", "order_status", "order_purchase_timestamp",
-            "price", "freight_value", "delivery_days", "on_time"
-        ]].head(500),
+        filtered[display_cols].head(500),
         use_container_width=True, height=300
     )
     st.caption(f"Menampilkan 500 baris pertama dari {len(filtered):,} total baris.")
