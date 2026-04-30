@@ -45,7 +45,7 @@ def load_data():
     # Fetch product categories from Kaggle dataset
     try:
         products_df = pd.read_csv(
-            "https://raw.githubusercontent.com/olist/datasets/master/products.csv",
+            "https://raw.githubusercontent.com/bareniel/E-Commerce-Public-Dataset/refs/heads/bareniel-patch-1/products_dataset.csv",
             usecols=['product_id', 'product_category_name']
         )
         df = df.merge(products_df, on='product_id', how='left')
