@@ -27,36 +27,43 @@ st.markdown("""
 # ── Load Data ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    # Load main data dan products dari file lokal
-    df = pd.read_csv("main_data.csv")
+    # URL download langsung dari Google Drive untuk main_data.csv
+    file_id = "1kB3n7XBYqnvIqXggYymXnOh6kDnA1hev"
+    main_data_url = f"https://drive.google.com/uc?id={file_id}"
+    
+    # Load main data dari Google Drive
+    df = pd.read_csv(main_data_url)
+    
+    # Konversi tipe data waktu
     df["order_purchase_timestamp"] = pd.to_datetime(df["order_purchase_timestamp"])
     df["order_delivered_customer_date"] = pd.to_datetime(df["order_delivered_customer_date"], errors="coerce")
     df["order_estimated_delivery_date"] = pd.to_datetime(df["order_estimated_delivery_date"], errors="coerce")
+    
+    # Ekstraksi fitur waktu
     df["year_month"] = df["order_purchase_timestamp"].dt.to_period("M").astype(str)
     df["year"] = df["order_purchase_timestamp"].dt.year
     df["month"] = df["order_purchase_timestamp"].dt.month
     df["day_of_week"] = df["order_purchase_timestamp"].dt.day_name()
+    
+    # Hitung durasi pengiriman & status on-time
     df["delivery_days"] = (
         df["order_delivered_customer_date"] - df["order_purchase_timestamp"]
     ).dt.days
     df["on_time"] = df["order_delivered_customer_date"] <= df["order_estimated_delivery_date"]
 
-    # Merge kategori produk dari products_dataset.csv lokal
-    try:
-        products_df = pd.read_csv(
-            "products_dataset.csv",
-            usecols=['product_id', 'product_category_name']
-        )
-        # Jika product_category_name sudah ada di df (dari main_data), drop dulu sebelum merge
-        if 'product_category_name' in df.columns:
-            df = df.drop(columns=['product_category_name'])
-        df = df.merge(products_df, on='product_id', how='left')
-    except Exception as e:
-        st.warning(f"⚠️ Gagal memuat products_dataset.csv: {e}")
-        df['product_category_name'] = 'Kategori Tidak Tersedia'
-
-    # FIX 9: Isi NaN pada product_category_name agar tidak masuk groupby sebagai kategori kosong
-    if 'product_category_name' in df.columns:
+    # Load data kategori jika tidak ada di main_data
+    if 'product_category_name' not in df.columns:
+        try:
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            products_path = os.path.join(current_dir, "products_dataset.csv")
+            products_df = pd.read_csv(products_path, usecols=['product_id', 'product_category_name'])
+            df = df.merge(products_df, on='product_id', how='left')
+            df['product_category_name'] = df['product_category_name'].fillna('Tidak Diketahui')
+        except Exception as e:
+            st.warning("ℹ️ Tidak memuat file lokal products_dataset.csv. Menggunakan kategori default.")
+            df['product_category_name'] = 'Kategori Tidak Tersedia'
+    else:
         df['product_category_name'] = df['product_category_name'].fillna('Tidak Diketahui')
 
     return df
@@ -64,7 +71,6 @@ def load_data():
 df = load_data()
 
 # ── Sidebar Filters ───────────────────────────────────────────────────────────
-# FIX 4: Inisialisasi has_status di luar blok sidebar agar tidak terjadi NameError
 has_status = False
 selected_status = []
 
@@ -80,7 +86,7 @@ with st.sidebar:
         selected_status = st.multiselect("Status Pesanan", status_options, default=status_options)
         has_status = True
     else:
-        st.info("ℹ️ Kolom order_status tidak tersedia di data lokal")
+        st.info("ℹ️ Kolom order_status tidak tersedia")
 
     price_min, price_max = float(df["price"].min()), float(df["price"].max())
     price_range = st.slider("Rentang Harga (R$)", price_min, price_max, (price_min, price_max))
@@ -98,14 +104,12 @@ filtered = df[
 if has_status and selected_status:
     filtered = filtered[filtered["order_status"].isin(selected_status)]
 
-# FIX 7: Guard jika filtered kosong akibat filter terlalu ketat
 if filtered.empty:
     st.warning("⚠️ Tidak ada data yang sesuai dengan filter yang dipilih. Silakan sesuaikan filter.")
     st.stop()
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📦 Dashboard E-Commerce")
-# FIX 1: Tambahkan guard agar .strftime tidak crash saat filtered kosong (sudah di-stop di atas, ini sebagai lapisan tambahan)
 try:
     periode_start = filtered['order_purchase_timestamp'].min().strftime('%d %b %Y')
     periode_end = filtered['order_purchase_timestamp'].max().strftime('%d %b %Y')
@@ -121,7 +125,6 @@ total_revenue = filtered["price"].sum() + filtered["freight_value"].sum()
 total_orders = filtered["order_id"].nunique()
 on_time_pct = filtered["on_time"].mean() * 100 if filtered["on_time"].notna().any() else 0
 
-# FIX 2 & 3: Tangani NaN pada avg_order_value dan avg_delivery sebelum format string
 avg_order_value = filtered["price"].mean()
 avg_order_str = f"R$ {avg_order_value:.2f}" if pd.notna(avg_order_value) else "N/A"
 
@@ -184,7 +187,7 @@ with col_right:
         )
         st.plotly_chart(fig_pie, use_container_width=True)
     else:
-        st.info("ℹ️ Visualisasi status pesanan tidak tersedia di data lokal")
+        st.info("ℹ️ Visualisasi status pesanan tidak tersedia")
 
 # ── Row 2: Price Distribution + Day of Week ────────────────────────────────────
 col_a, col_b = st.columns(2)
@@ -299,7 +302,6 @@ with col_c:
         (filtered["delivery_days"] > 0) & (filtered["delivery_days"] <= 60)
     ]["delivery_days"]
 
-    # FIX 10: Tampilkan pesan jika delivery_data kosong agar histogram tidak crash
     if delivery_data.empty:
         st.info("ℹ️ Tidak ada data pengiriman yang valid untuk ditampilkan.")
     else:
@@ -318,7 +320,6 @@ with col_c:
 
 with col_d:
     st.subheader("✈️ Ongkos Kirim vs Harga Produk")
-    # FIX 5: Tangani scatter plot jika order_status tidak ada di filtered
     scatter_df = filtered[filtered["price"] <= filtered["price"].quantile(0.95)]
     sample = scatter_df.sample(min(3000, len(scatter_df)), random_state=42)
 
@@ -342,8 +343,7 @@ with col_d:
 # ── Raw Data Preview ──────────────────────────────────────────────────────────
 st.markdown("---")
 with st.expander("🗄️ Lihat Data Mentah", expanded=False):
-    # FIX 6: Pilih kolom secara dinamis, hanya sertakan kolom yang benar-benar ada
-    base_cols = ["order_id", "order_purchase_timestamp", "price", "freight_value", "delivery_days", "on_time"]
+    base_cols = ["order_id", "order_purchase_timestamp", "price", "freight_value", "product_category_name", "delivery_days", "on_time"]
     optional_cols = ["order_status"]
     display_cols = base_cols + [c for c in optional_cols if c in filtered.columns]
 
