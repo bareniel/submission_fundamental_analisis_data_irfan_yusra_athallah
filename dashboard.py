@@ -65,8 +65,15 @@ with st.sidebar:
     year_options = sorted(df["year"].unique())
     selected_years = st.multiselect("Tahun", year_options, default=year_options)
 
-    status_options = sorted(df["order_status"].unique())
-    selected_status = st.multiselect("Status Pesanan", status_options, default=status_options)
+    # Handle order_status filter with fallback
+    if "order_status" in df.columns:
+        status_options = sorted(df["order_status"].unique())
+        selected_status = st.multiselect("Status Pesanan", status_options, default=status_options)
+        has_status = True
+    else:
+        selected_status = []
+        has_status = False
+        st.info("ℹ️ Kolom order_status tidak tersedia di data lokal")
 
     price_min, price_max = float(df["price"].min()), float(df["price"].max())
     price_range = st.slider("Rentang Harga (R$)", price_min, price_max, (price_min, price_max))
@@ -78,9 +85,12 @@ with st.sidebar:
 # ── Apply Filters ─────────────────────────────────────────────────────────────
 filtered = df[
     df["year"].isin(selected_years) &
-    df["order_status"].isin(selected_status) &
     df["price"].between(price_range[0], price_range[1])
 ]
+
+# Add status filter only if column exists
+if has_status and "order_status" in df.columns:
+    filtered = filtered[filtered["order_status"].isin(selected_status)]
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📦 Dashboard E-Commerce")
@@ -137,19 +147,22 @@ with col_left:
 
 with col_right:
     st.subheader("🏷️ Status Pesanan")
-    status_counts = filtered["order_status"].value_counts().reset_index()
-    status_counts.columns = ["Status", "Count"]
-    colors = ["#4361ee", "#7209b7", "#f72585", "#4cc9f0", "#06d6a0", "#ffd166", "#ef476f"]
-    fig_pie = px.pie(
-        status_counts, names="Status", values="Count",
-        color_discrete_sequence=colors, hole=0.45
-    )
-    fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-    fig_pie.update_layout(
-        showlegend=False, margin=dict(l=0, r=0, t=30, b=0), height=300,
-        plot_bgcolor="white", paper_bgcolor="white"
-    )
-    st.plotly_chart(fig_pie, use_container_width=True)
+    if "order_status" in filtered.columns and not filtered["order_status"].isna().all():
+        status_counts = filtered["order_status"].value_counts().reset_index()
+        status_counts.columns = ["Status", "Count"]
+        colors = ["#4361ee", "#7209b7", "#f72585", "#4cc9f0", "#06d6a0", "#ffd166", "#ef476f"]
+        fig_pie = px.pie(
+            status_counts, names="Status", values="Count",
+            color_discrete_sequence=colors, hole=0.45
+        )
+        fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+        fig_pie.update_layout(
+            showlegend=False, margin=dict(l=0, r=0, t=30, b=0), height=300,
+            plot_bgcolor="white", paper_bgcolor="white"
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+    else:
+        st.info("ℹ️ Visualisasi status pesanan tidak tersedia di data lokal")
 
 # ── Row 2: Price Distribution + Day of Week ────────────────────────────────────
 col_a, col_b = st.columns(2)
