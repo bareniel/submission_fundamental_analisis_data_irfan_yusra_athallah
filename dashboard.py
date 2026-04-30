@@ -33,7 +33,7 @@ def load_data():
     if os.path.exists(local_path):
         df = pd.read_csv(local_path)
     else:
-        file_id = "1nPZ72aIaqoFFInIY00Qjf4U7X51R7ooz"
+        file_id = "15UCFxxEdyVtrzhEdlJTGH0TCYw1U_o4a"
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
         df = pd.read_csv(url)
 
